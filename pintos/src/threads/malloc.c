@@ -90,6 +90,7 @@ malloc_init (void)
 
 void splitBigBlock(struct block *b,int level,int oldLevel){
   struct block *temp;
+    printf("\n\nDid You miss me ? arenaListcnt=%d \n\n",list_size(&arenaList));
 
   while(1){
     if(level==oldLevel)break;
@@ -101,10 +102,9 @@ void splitBigBlock(struct block *b,int level,int oldLevel){
     //printf("\n\nYHA kyu PE bhi THA MAI,level=%d,oldLevel=%d\n\n",level,oldLevel );
 
   }
-
 }
 
-struct block* nonConventionalBlock(){
+struct block* nonConventionalBlock(size_t size){
       struct arena *a;
       struct block *b;
       size_t page_cnt = DIV_ROUND_UP (size + sizeof *a, PGSIZE);
@@ -121,6 +121,25 @@ struct block* nonConventionalBlock(){
 
 /* Obtains and returns a new block of at least SIZE bytes.
    Returns a null pointer if memory is not available. */
+
+struct block* getNewPage_and_block(){
+  struct arena *a;
+  
+  if((a=palloc_get_page(0))==NULL){
+    lock_release(&lock);
+    return NULL;
+  }
+  a->magic = ARENA_MAGIC;
+  list_push_front(&arenaList,&a->elem);
+  //lock_release(&lock);
+  return arena_to_block(a);
+}
+
+
+
+
+
+
 void *
 malloc (size_t size) 
 {
@@ -143,14 +162,15 @@ malloc (size_t size)
   }
   
  // printf("\n\ndesk_cnt=%d\n\n",level);
+  lock_acquire (&lock);
+
 
   if (d == descs + desc_cnt) {
       /* SIZE is too big for any descriptor.
          Allocate enough pages to hold SIZE plus an arena. */
-      return unConventionalBlock();
+      return nonConventionalBlock(size);
     }
 
-  lock_acquire (&lock);
 
   /* If the free list is empty, create a new arena. */
   oldLevel=level;
@@ -159,22 +179,12 @@ malloc (size_t size)
 
   if (list_empty (&d->free_list)){
     while(list_empty(&d->free_list)){
+      if(level==7)break;
       d++;
       level++;
-      if(level==7)break;
     }
-    if(level==7){
-      
-      
-      a=palloc_get_page(0);
-      if(a==NULL){
-        lock_release(&lock);
-        return NULL;
-      }
-      a->magic = ARENA_MAGIC;
-      list_push_front(&arenaList,&a->elem);
-      b = arena_to_block(a);
-    }
+    if(level==7)b=getNewPage_and_block();
+    
     else
       b = list_entry(list_pop_front(&(d->free_list)),struct block,free_elem);  
   }
@@ -196,14 +206,11 @@ malloc (size_t size)
 
 /* Allocates and return A times B bytes initialized to zeroes.
    Returns a null pointer if memory is not available. */
-void *
-calloc (size_t a, size_t b) 
+void* calloc (size_t a, size_t b) 
 {
   void *p;
-  size_t size;
+  size_t size=a*b;
 
-  /* Calculate block size and make sure it fits in size_t. */
-  size = a * b;
   if (size < a || size < b)
     return NULL;
 
@@ -266,9 +273,10 @@ struct block* getBuddy(struct block *b){
 
 */
 struct block * getBuddy(struct block * p,int index){
-  struct block * startblock = arena_to_block(block_to_arena(p));
-  return (struct block *)((((uintptr_t) p - (uintptr_t) startblock)^(1<<(index+4))) + (uintptr_t) startblock);
-
+  struct arena *tmp=block_to_arena(p);
+  struct block * startblock = arena_to_block(tmp);
+  struct block *BUDDY= (struct block *)((((uintptr_t) p - (uintptr_t) startblock)^(1<<(index+4))) + (uintptr_t) startblock);
+  return BUDDY;
 }
 
 
@@ -323,13 +331,20 @@ free (void *p)
 }
 
 
-/* Returns the arena that block B is inside. */
-static struct arena *
-block_to_arena (struct block *b)
-{
-  struct arena *a = pg_round_down (b);
 
-  /* Check that the arena is valid. */
+static struct block* arena_to_block (struct arena *a){
+  
+  ASSERT (a != NULL);
+  ASSERT (a->magic == ARENA_MAGIC);
+  return (struct block *)((uint8_t *)a+ sizeof *a);
+}
+
+
+
+
+
+static struct arena* block_to_arena (struct block *b){
+  struct arena *a = pg_round_down (b);
   ASSERT (a != NULL);
   ASSERT (a->magic == ARENA_MAGIC);
   ASSERT ((pg_ofs(b) - sizeof *a)%16==0);
@@ -337,14 +352,6 @@ block_to_arena (struct block *b)
 }
 
 /* Returns the (IDX - 1)'th block within arena A. */
-static struct block *
-arena_to_block (struct arena *a)//, size_t idx) 
-{
-  ASSERT (a != NULL);
-  ASSERT (a->magic == ARENA_MAGIC);
-  return (struct block *) ((uint8_t *) a
-                           + sizeof *a);
-}
 
 
 bool compare(const struct block * b1,const struct block * b2,void * aux){
