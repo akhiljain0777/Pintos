@@ -98,10 +98,24 @@ void splitBigBlock(struct block *b,int level,int oldLevel){
     temp->tmp[1] = 0;  
     list_insert_ordered(&(descs[level-1].free_list),&temp->free_elem,&compare,(void *)NULL);
     level--;
-    printf("\n\nYHA kyu PE bhi THA MAI,level=%d,oldLevel=%d\n\n",level,oldLevel );
+    //printf("\n\nYHA kyu PE bhi THA MAI,level=%d,oldLevel=%d\n\n",level,oldLevel );
 
   }
 
+}
+
+struct block* nonConventionalBlock(){
+      struct arena *a;
+      struct block *b;
+      size_t page_cnt = DIV_ROUND_UP (size + sizeof *a, PGSIZE);
+      if((a = palloc_get_multiple (0, page_cnt))==NULL)return NULL;
+      a->magic = ARENA_MAGIC;
+      list_push_front(&arenaList,&a->elem);
+      b = arena_to_block(a);
+      b->tmp[0]=7;
+      b->tmp[1]=1;
+      b=(void *)((char*)(b)+2);
+      return b;
 }
 
 
@@ -128,33 +142,19 @@ malloc (size_t size)
       break;
   }
   
-  printf("\n\ndesk_cnt=%d\n\n",level);
+ // printf("\n\ndesk_cnt=%d\n\n",level);
 
-  if (d == descs + desc_cnt) 
-    {
+  if (d == descs + desc_cnt) {
       /* SIZE is too big for any descriptor.
          Allocate enough pages to hold SIZE plus an arena. */
-      size_t page_cnt = DIV_ROUND_UP (size + sizeof *a, PGSIZE);
-      a = palloc_get_multiple (0, page_cnt);
-      if (a == NULL)
-        return NULL;
-
-      /* Initialize the arena to indicate a big block of PAGE_CNT
-         pages, and return it. */
-      a->magic = ARENA_MAGIC;
-      list_push_front(&arenaList,&a->elem);
-      b = arena_to_block(a);
-      b->tmp[0]=7;
-      b->tmp[1]=1;
-      b=(void *)((char*)(b)+2);
-      return b;
+      return unConventionalBlock();
     }
 
   lock_acquire (&lock);
 
   /* If the free list is empty, create a new arena. */
   oldLevel=level;
-  printf("level=%d , oldLevel=%d \n",level,oldLevel );
+  //printf("level=%d , oldLevel=%d \n",level,oldLevel );
 
 
   if (list_empty (&d->free_list)){
@@ -285,7 +285,7 @@ void mergeBlocks(struct block *b,struct block* buddy,struct arena* a){
         newBuddy =getBuddy(b,b->tmp[0]);
         buddy = newBuddy;
       }
-      printf("here\n");
+     // printf("here\n");
       if ( b->tmp[0] >= 7 ){
         a = block_to_arena(b);
         list_remove(&a->elem);
@@ -303,14 +303,15 @@ free (void *p)
 {
   if (p != NULL)
     {
-      p = (char *) p -  2;
-      struct block *b = p;
+      p = (void *)((char *) p -  2);
+      struct block *b =(struct block *) p;
+ /*#ifndef NDEBUG
+            //Clear the block to help detect use-after-free bugs. 
+    memset (b, 0xcc, 1<<b->tmp[0]+4);
+ #endif
+*/
+      
       struct arena *a = block_to_arena (b);
- /*     
- #ifndef NDEBUG
-//            //Clear the block to help detect use-after-free bugs. 
-    memset (b, 0xcc, d->block_size);
- #endif*/
   
       lock_acquire (&lock);
       struct block * buddy = getBuddy(b,b->tmp[0]);
@@ -350,33 +351,34 @@ bool compare(const struct block * b1,const struct block * b2,void * aux){
   return (uintptr_t)b1 < (uintptr_t)b2;
 }
 
+void printHelper(){
+  int i,j=0,k;
+  struct list_elem *ele,*e;
+
+  for(ele = list_begin(&arenaList); ele != list_end(&arenaList);ele=list_next(ele)){
+      printf("Page %d\n\n",++j);
+      struct arena *a = list_entry(ele,struct arena,elem);
+      printf("Page address = %u \n\n", a);
+      k=16;
+      for(i=0;i<7;i++,k*=2){
+        printf("Size %d :",k);
+        for (e = list_begin (&descs[i].free_list); e != list_end (&descs[i].free_list);e = list_next (e)){
+          struct block *b = list_entry (e, struct block, free_elem);
+          if (a == block_to_arena(b))printf("%p  ",b);
+        }
+        printf("\n\n");
+      }
+      printf("\n\n");
+  }
+
+}
+
 
 void printMemory()
 {
-  int i,j=0;
-  struct list_elem * ele;
-  if (list_empty(&arenaList))
-    printf("No free blocks in memory\n");
-  else
-    for (ele = list_begin(&arenaList); ele != list_end(&arenaList);ele=list_next(ele)){
-      printf("Page no %d\n",j++);
-      struct arena *a = list_entry(ele,struct arena,elem);
-      printf("Page address = %u \n", a);
-      for(i=0;i<7;i++)
-      {
-          struct list_elem *e;
+  printf("No. of pages allocated %u\n",list_size(&arenaList));
+  /*if(list_size(&arenaList)==0){
 
-          printf("Blocks of size %d :",1<<(i+4));
-          // if (list_empty(&descs[i].free_list)) printf("list_empty %d",i );
-          for (e = list_begin (&descs[i].free_list); e != list_end (&descs[i].free_list);e = list_next (e))
-          {
-            struct block *b = list_entry (e, struct block, free_elem);
-            if (a == block_to_arena(b))
-              printf("%u  ",b);
-            
-          }
-          printf("\n");
-      }
-
-  }
+  }*/
+  printHelper();
 }
