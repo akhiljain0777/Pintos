@@ -24,8 +24,6 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
-static struct list ready_list2;
-
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -93,7 +91,6 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
-  list_init (&ready_list2);
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -127,40 +124,9 @@ thread_tick (void)
 {
   struct thread *t = thread_current ();
 
-
-  t->runningTime++;
-  //printf("check level=%d (%s), %d\n",t->level,t->name,t->runningTime);
-  
-
-  struct list_elem *e;
-    
-  for (e = list_begin (&ready_list2); e != list_end (&ready_list2);e = list_next (e)){
-    struct thread *t1 = list_entry (e, struct thread,elem);
-    
-    if(t->level==1)t1->waitingTime++;
-    else t1->waitingTime=0;
-    //printf("level=%d (%s), %d\n",t1->level,t1->name,t1->waitingTime);
-
-    if( t1->waitingTime >= 6*TIME_SLICE){
-      printf("Removing (%d) (%s) from level2 and inserting it to level1,runningTime=%d,waitingTime=%d,level=%d\n",t1->tid,t1->name,t1->runningTime,t1->waitingTime,t1->level);
-      t1->runningTime=0;
-      t1->waitingTime=0;
-      t1->level=1;
-      struct list_elem *e1=list_remove(&t1->elem);
-      list_push_back(&ready_list,&t1->elem);
-      e=list_prev(e1);
-    }
-
-  }
-
   /* Update statistics. */
   if (t == idle_thread)
     idle_ticks++;
-
-
-
-
-
 #ifdef USERPROG
   else if (t->pagedir != NULL)
     user_ticks++;
@@ -169,14 +135,9 @@ thread_tick (void)
     kernel_ticks++;
 
   /* Enforce preemption. */
-  if (t->level==1 && ++thread_ticks >= TIME_SLICE)
+  if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
-
-  if (t->level==2 && ++thread_ticks >= 2*TIME_SLICE)
-    intr_yield_on_return ();
-
 }
-
 
 /* Prints thread statistics. */
 void
@@ -284,12 +245,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-
-  if(t->level==1)
-    list_push_back (&ready_list, &t->elem);
-  else
-    list_push_back (&ready_list2, &t->elem);
-  
+  list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -359,24 +315,8 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-
-
-  if (cur != idle_thread && cur-> runningTime >=2*TIME_SLICE && cur->level==1){
-    printf("pushing %d (%s) from level 1 to level 2, runningTime=%d ,currLevel=%d\n",cur->tid,cur->name,cur->runningTime,cur->level);
-    cur->runningTime=0;
-    cur->waitingTime=0;
-    cur->level=2;
-    list_push_back (&ready_list2, &cur->elem);
-  }
-
-  else if(cur!=idle_thread && cur->level==1){
-    list_push_back(&ready_list,&cur->elem);
-  }
-  
-  else if(cur!=idle_thread && cur->level==2){
-    list_push_back(&ready_list2,&cur->elem);
-  }
-
+  if (cur != idle_thread) 
+    list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -529,9 +469,6 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  t->runningTime=0;
-  t->waitingTime=0;
-  t->level=1;
   list_push_back (&all_list, &t->allelem);
 }
 
@@ -556,13 +493,10 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (list_empty (&ready_list) && list_empty(&ready_list2))
+  if (list_empty (&ready_list))
     return idle_thread;
-  
-  if(!list_empty(&ready_list))
+  else
     return list_entry (list_pop_front (&ready_list), struct thread, elem);
-
-  return list_entry(list_pop_front (&ready_list2), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
