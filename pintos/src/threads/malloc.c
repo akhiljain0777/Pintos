@@ -66,7 +66,7 @@ static struct block *arena_to_block (struct arena *);
 bool compare(const struct block * b1,const struct block * b2,void * aux);
 void splitBigBlock(struct block *b,int level,int oldLevel);
 static struct list arenaList;
-struct block* getBuddy(struct block ,int);
+struct block* getBuddy(struct block*,int index);
 void printMemory();
 /* Initializes the malloc() descriptors. */
 void
@@ -90,14 +90,18 @@ malloc_init (void)
 
 void splitBigBlock(struct block *b,int level,int oldLevel){
   struct block *temp;
+
   while(1){
     if(level==oldLevel)break;
-    temp = (struct block *)(((int) b) + 1<<(level+3));
+    temp = getBuddy(b,level-1);
     temp->tmp[0] = level-1;
     temp->tmp[1] = 0;  
     list_insert_ordered(&(descs[level-1].free_list),&temp->free_elem,&compare,(void *)NULL);
     level--;
+    printf("\n\nYHA kyu PE bhi THA MAI,level=%d,oldLevel=%d\n\n",level,oldLevel );
+
   }
+
 }
 
 
@@ -118,17 +122,18 @@ malloc (size_t size)
      request. */
   size=size+2*sizeof(char);
   int level=0,oldLevel=0;
-
+  desc_cnt=7;
   for (d = descs; d < descs + desc_cnt; d++,level++){
     if (d->block_size >= size)
       break;
   }
   
+  printf("\n\ndesk_cnt=%d\n\n",level);
+
   if (d == descs + desc_cnt) 
     {
       /* SIZE is too big for any descriptor.
          Allocate enough pages to hold SIZE plus an arena. */
-      printf("YHA PE THA MAI,level=%d\n",level );
       size_t page_cnt = DIV_ROUND_UP (size + sizeof *a, PGSIZE);
       a = palloc_get_multiple (0, page_cnt);
       if (a == NULL)
@@ -149,7 +154,9 @@ malloc (size_t size)
 
   /* If the free list is empty, create a new arena. */
   oldLevel=level;
-  
+  printf("level=%d , oldLevel=%d \n",level,oldLevel );
+
+
   if (list_empty (&d->free_list)){
     while(list_empty(&d->free_list)){
       d++;
@@ -157,12 +164,16 @@ malloc (size_t size)
       if(level==7)break;
     }
     if(level==7){
+      
+      
       a=palloc_get_page(0);
-      if(a==NULL)
+      if(a==NULL){
+        lock_release(&lock);
         return NULL;
-        a->magic = ARENA_MAGIC;
-        list_push_front(&arenaList,&a->elem);
-        b = arena_to_block(a);
+      }
+      a->magic = ARENA_MAGIC;
+      list_push_front(&arenaList,&a->elem);
+      b = arena_to_block(a);
     }
     else
       b = list_entry(list_pop_front(&(d->free_list)),struct block,free_elem);  
@@ -170,8 +181,10 @@ malloc (size_t size)
   else
     b = list_entry(list_pop_front(&(d->free_list)),struct block,free_elem);
 
+
+
   if(level!=oldLevel)
-    splitBigBlock(b,oldLevel,level);
+    splitBigBlock(b,level,oldLevel);
 
   b->tmp[0]=oldLevel;
   b->tmp[1]=1;
