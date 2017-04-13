@@ -90,7 +90,7 @@ malloc_init (void)
 
 void splitBigBlock(struct block *b,int level,int oldLevel){
   struct block *temp;
-    printf("\n\nDid You miss me ? arenaListcnt=%d \n\n",list_size(&arenaList));
+  //printf("\n\nDid You miss me ? arenaListcnt=%d \n\n",list_size(&arenaList));
 
   while(1){
     if(level==oldLevel)break;
@@ -115,6 +115,7 @@ struct block* nonConventionalBlock(size_t size){
       b->tmp[0]=7;
       b->tmp[1]=1;
       b=(void *)((char*)(b)+2);
+      lock_release(&lock);
       return b;
 }
 
@@ -143,6 +144,7 @@ struct block* getNewPage_and_block(){
 void *
 malloc (size_t size) 
 {
+  printf("Entered in malloc\n\n");
   struct desc *d;
   struct block *b;
   struct arena *a;
@@ -161,7 +163,7 @@ malloc (size_t size)
       break;
   }
   
- // printf("\n\ndesk_cnt=%d\n\n",level);
+  
   lock_acquire (&lock);
 
 
@@ -223,9 +225,7 @@ void* calloc (size_t a, size_t b)
 }
 
 /* Returns the number of bytes allocated for BLOCK. */
-static size_t
-block_size (void *block) 
-{
+static size_t block_size (void *block) {
   struct block *b =(struct block *)( (char *)block - 2);
   return 1<<(b->tmp[0]+4);
 }
@@ -237,26 +237,21 @@ block_size (void *block)
    null pointer.
    A call with null OLD_BLOCK is equivalent to malloc(NEW_SIZE).
    A call with zero NEW_SIZE is equivalent to free(OLD_BLOCK). */
-void *
-realloc (void *old_block, size_t new_size) 
+void* realloc (void *old_block, size_t new_size) 
 {
-  if (new_size == 0) 
-    {
+  if (new_size == 0) {
       free (old_block);
       return NULL;
-    }
-  else 
-    {
-      void *new_block = malloc (new_size);
-      if (old_block != NULL && new_block != NULL)
-        {
-          size_t old_size = block_size (old_block) - 2;
-          size_t min_size = new_size < old_size ? new_size : old_size;
-          memcpy (new_block, old_block, min_size);
-          free (old_block);
-        }
-      return new_block;
-    }
+  }
+  void *new_block = malloc (new_size);
+  if (old_block != NULL && new_block != NULL){
+    size_t old_size = block_size (old_block);
+    old_size-=2;
+    size_t min_size = new_size < old_size ? new_size : old_size;
+    memcpy (new_block, old_block, min_size);
+    free (old_block);
+  }
+  return new_block;
 }
 
 /* Frees block P, which must have been previously allocated with
@@ -333,7 +328,6 @@ free (void *p)
 
 
 static struct block* arena_to_block (struct arena *a){
-  
   ASSERT (a != NULL);
   ASSERT (a->magic == ARENA_MAGIC);
   return (struct block *)((uint8_t *)a+ sizeof *a);
@@ -351,7 +345,6 @@ static struct arena* block_to_arena (struct block *b){
   return a;
 }
 
-/* Returns the (IDX - 1)'th block within arena A. */
 
 
 bool compare(const struct block * b1,const struct block * b2,void * aux){
@@ -361,16 +354,18 @@ bool compare(const struct block * b1,const struct block * b2,void * aux){
 void printHelper(){
   int i,j=0,k;
   struct list_elem *ele,*e;
+  struct block *b;
 
   for(ele = list_begin(&arenaList); ele != list_end(&arenaList);ele=list_next(ele)){
       printf("Page %d\n\n",++j);
       struct arena *a = list_entry(ele,struct arena,elem);
       printf("Page address = %u \n\n", a);
       k=16;
-      for(i=0;i<7;i++,k*=2){
+      int noOfDesc=7;
+      for(i=0;i<noOfDesc;i++,k*=2){
         printf("Size %d :",k);
         for (e = list_begin (&descs[i].free_list); e != list_end (&descs[i].free_list);e = list_next (e)){
-          struct block *b = list_entry (e, struct block, free_elem);
+          b = list_entry (e, struct block, free_elem);
           if (a == block_to_arena(b))printf("%p  ",b);
         }
         printf("\n\n");
